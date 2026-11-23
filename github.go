@@ -282,10 +282,11 @@ func (c *Client) sameOrigin(raw string) bool {
 	return err1 == nil && err2 == nil && strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
 }
 
-func (c *Client) listAll(ctx context.Context, path string) ([]Repo, error) {
-	var all []Repo
+// getAll fetches every page of a list endpoint.
+func getAll[T any](ctx context.Context, c *Client, path string) ([]T, error) {
+	var all []T
 	for next := path; next != ""; {
-		var page []Repo
+		var page []T
 		resp, err := c.do(ctx, http.MethodGet, next, nil, &page)
 		if err != nil {
 			return nil, err
@@ -329,7 +330,7 @@ func (c *Client) GetRepo(ctx context.Context, owner, name string) (*Repo, error)
 func (c *Client) ListRepos(ctx context.Context, owner string, me *Account) ([]Repo, error) {
 	if strings.EqualFold(owner, me.Login) {
 		// Includes private repositories of the authenticated user.
-		return c.listAll(ctx, "/user/repos?affiliation=owner&per_page=100")
+		return getAll[Repo](ctx, c, "/user/repos?affiliation=owner&per_page=100")
 	}
 	acct, err := c.GetAccount(ctx, owner)
 	if err != nil {
@@ -339,9 +340,15 @@ func (c *Client) ListRepos(ctx context.Context, owner string, me *Account) ([]Re
 		return nil, err
 	}
 	if acct.Type == "Organization" {
-		return c.listAll(ctx, "/orgs/"+url.PathEscape(acct.Login)+"/repos?type=all&per_page=100")
+		return getAll[Repo](ctx, c, "/orgs/"+url.PathEscape(acct.Login)+"/repos?type=all&per_page=100")
 	}
-	return c.listAll(ctx, "/users/"+url.PathEscape(acct.Login)+"/repos?type=owner&per_page=100")
+	return getAll[Repo](ctx, c, "/users/"+url.PathEscape(acct.Login)+"/repos?type=owner&per_page=100")
+}
+
+// MyOrgs lists the organizations the authenticated user belongs to.
+// Classic tokens need the read:org (or user) scope to see all of them.
+func (c *Client) MyOrgs(ctx context.Context) ([]Account, error) {
+	return getAll[Account](ctx, c, "/user/orgs?per_page=100")
 }
 
 // TransferRepo starts the transfer of owner/name to newOwner.

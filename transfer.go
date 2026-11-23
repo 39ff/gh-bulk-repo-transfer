@@ -127,20 +127,18 @@ func cmdTransfer(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	nTransfer, nSkip, nErr := printPlan(stdout, entries, dest)
-	exitCode := func(failed int) int {
-		if failed > 0 || nErr > 0 {
-			return 1
-		}
-		return 0
+	nTransfer, _, nErr := printPlan(stdout, entries, dest)
+	planExit := 0
+	if nErr > 0 {
+		planExit = 1
 	}
 	if nTransfer == 0 {
 		fmt.Fprintln(stdout, "Nothing to transfer.")
-		return exitCode(0)
+		return planExit
 	}
 	if dryRun {
 		fmt.Fprintln(stdout, "Dry run: nothing was transferred.")
-		return exitCode(0)
+		return planExit
 	}
 	if !yes {
 		prompt := fmt.Sprintf("Transfer %d repositories to %s? [y/N]: ", nTransfer, dest.Login)
@@ -150,6 +148,23 @@ func cmdTransfer(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		}
 	}
 
+	return executePlan(ctx, client, me, dest, entries, archive, interval, stdout, stderr)
+}
+
+// executePlan transfers every entry with status "transfer", prints a summary
+// and returns the exit code.
+func executePlan(ctx context.Context, client *Client, me, dest *Account, entries []*planEntry, archive bool, interval time.Duration, stdout, stderr io.Writer) int {
+	var nTransfer, nSkip, nErr int
+	for _, e := range entries {
+		switch e.Status {
+		case statusTransfer:
+			nTransfer++
+		case statusSkip:
+			nSkip++
+		default:
+			nErr++
+		}
+	}
 	needsAcceptance := dest.Type != "Organization" && !strings.EqualFold(dest.Login, me.Login)
 	var transferred, archiveFailed int
 	var failed []string
@@ -209,7 +224,10 @@ func cmdTransfer(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		fmt.Fprintln(stderr, "Interrupted.")
 		return 130
 	}
-	return exitCode(len(failed) + archiveFailed)
+	if len(failed) > 0 || archiveFailed > 0 || nErr > 0 {
+		return 1
+	}
+	return 0
 }
 
 func buildPlan(ctx context.Context, c *Client, me, dest *Account, source string, refs []string, explicit bool, filter *repoFilter, log io.Writer) ([]*planEntry, error) {
@@ -266,17 +284,30 @@ func buildPlan(ctx context.Context, c *Client, me, dest *Account, source string,
 			entries = append(entries, &planEntry{Name: r.FullName, Repo: r})
 		}
 	}
+	return entries, checkEntries(ctx, c, entries, dest)
+}
 
+// planRepos builds a checked plan for repositories that were already fetched.
+func planRepos(ctx context.Context, c *Client, repos []*Repo, dest *Account) ([]*planEntry, error) {
+	entries := make([]*planEntry, 0, len(repos))
+	for _, r := range repos {
+		entries = append(entries, &planEntry{Name: r.FullName, Repo: r})
+	}
+	return entries, checkEntries(ctx, c, entries, dest)
+}
+
+// checkEntries runs the pre-transfer checks for entries without a status yet.
+func checkEntries(ctx context.Context, c *Client, entries []*planEntry, dest *Account) error {
 	for _, e := range entries {
 		if e.Status != "" {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		e.Status, e.Reason = checkTransferable(ctx, c, e.Repo, dest.Login)
 	}
-	return entries, nil
+	return nil
 }
 
 func checkTransferable(ctx context.Context, c *Client, r *Repo, to string) (status, reason string) {

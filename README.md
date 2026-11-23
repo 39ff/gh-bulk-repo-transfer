@@ -3,8 +3,9 @@
 いらない GitHub リポジトリを、指定した Organization へまとめて移動（Transfer）するための CLI ツールです。
 GitHub REST API の [Transfer a repository](https://docs.github.com/en/rest/repos/repos#transfer-a-repository) を順番に呼び出します。
 
-- Windows / macOS / Linux（amd64・arm64）対応の単一バイナリ（依存なし）
-- 一覧をテキストファイルに書き出し → 残したい行だけ消す → 一括移動、という流れで使えます
+- Windows / macOS / Linux（amd64・arm64）対応の単一バイナリ（ランタイムのインストール不要）
+- **対話モード**: `ghbt` と打つだけで、移動元・移動先を選び、リポジトリをチェックボックスで選んで移動できます
+- スクリプト向けに、一覧をテキストファイルに書き出し → 残したい行だけ消す → 一括移動、という流れも使えます
 - 実行前に必ず「何を移動するか」を表示し、確認してから移動します（`--dry-run` あり）
 - 移動先に同名リポジトリがある / 既に移動済み / 権限がない などは事前チェックでスキップ
 - GitHub のレートリミットに当たった場合は自動で待って再試行
@@ -41,6 +42,7 @@ go build -o ghbt .
 2. 環境変数 `GH_TOKEN`
 3. 環境変数 `GITHUB_TOKEN`
 4. [GitHub CLI](https://cli.github.com/) のログイン情報（`gh auth token`）
+5. （対話モードのみ）どれも無ければ、画面でトークンの入力を求めます（保存はしません）
 
 いちばん簡単なのは GitHub CLI でログインしておく方法です。
 
@@ -51,6 +53,7 @@ gh auth login
 Personal Access Token を使う場合は **classic** トークンで `repo` スコープを付けてください。
 （fine-grained トークンは 1 つのオーナーにしかアクセスできないため、個人 → Org の移動には向きません。）
 移動先 Org が SAML SSO を使っている場合は、トークンの SSO 認可も必要です。
+対話モードで所属 Org を一覧から選ぶには `read:org` スコープも必要です（`gh auth login` のトークンには最初から付いています）。無い場合は「Other (type a name)...」を選んで Org 名を入力してください。
 
 必要な権限:
 
@@ -59,7 +62,48 @@ Personal Access Token を使う場合は **classic** トークンで `repo` ス�
 
 ## 使い方
 
-### おすすめの流れ（一覧ファイルを編集して移動）
+### いちばん簡単: 対話モード
+
+引数なしで実行するだけです（Windows なら `ghbt.exe` をダブルクリックしても起動します）。
+
+```bash
+ghbt
+```
+
+画面の指示に従って進めます。
+
+1. **Move repositories FROM**: 移動元を選ぶ（自分 / 所属 Org / 名前を入力）
+2. **Move repositories TO**: 移動先の Org を選ぶ
+3. **Select repositories**: 移動するリポジトリにチェックを付ける（最終 push が古い順に並びます）
+4. **Archive them after moving?**: 移動後にアーカイブするか
+5. 事前チェックの結果（同名あり・権限なし等はスキップ）を見て、**Transfer** で実行
+
+```text
+┃ Select repositories to move to archive-org (4, least recently pushed first)
+┃ space/x: select   /: filter   ctrl+a: select all   enter: done
+┃ > ✓ old-fork  2019-02-03    [fork]
+┃   • bar       2024-01-01    [private]
+┃   ✓ foo       2024-01-01    old experiment
+┃   • keep-me   2024-01-01    [stars:12]  important project
+```
+
+| キー | 動作 |
+| --- | --- |
+| `↑` `↓`（または `k` `j`） | 移動 |
+| `space` / `x` | チェックの ON/OFF |
+| `/` | 文字を入力して絞り込み（名前・日付・`fork`・`private` などで絞れます） |
+| `ctrl+a` | 全部選択 / 全部解除 |
+| `enter` | 決定 |
+| `shift+tab` | 同じ画面の前の項目に戻る |
+| `ctrl+c` | 選択中なら中止（何も移動しません）。移動の実行中に押すと、残りの移動を中断します |
+
+画面の表示が崩れる環境では、番号を入力して選ぶシンプルなモードも使えます。
+
+```bash
+ghbt interactive --accessible
+```
+
+### ファイルで指定する流れ（スクリプト・大量向け）
 
 ```bash
 # 1. 自分のリポジトリ一覧をファイルに書き出す（最終 push が古い順）
@@ -137,6 +181,8 @@ ghbt transfer --to my-archive-org --all --exclude keep
 ### コマンドとオプション
 
 ```text
+ghbt                                       対話モード
+ghbt interactive [flags]                   対話モード（--accessible, --interval などを指定する場合）
 ghbt list     [flags]                      リポジトリ一覧を表示 / ファイル出力
 ghbt transfer --to OWNER [flags] [REPO...]  リポジトリを OWNER へ移動
 ghbt version                               バージョン表示

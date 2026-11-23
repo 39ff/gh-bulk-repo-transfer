@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +29,7 @@ type fakeGitHub struct {
 	redirects map[string]string  // lower(old full name) -> new full name
 	transfers []string
 	archived  []string
+	orgs      []string // organizations the user belongs to
 	perPage   int
 	// rateLimitNextTransfer makes the next transfer fail once with a secondary rate limit.
 	rateLimitNextTransfer bool
@@ -46,6 +48,8 @@ func newFakeGitHub() *fakeGitHub {
 	f.addAccount("alice", "User")
 	f.addAccount("archive-org", "Organization")
 	f.addAccount("bob", "User")
+	f.addAccount("other-org", "Organization")
+	f.orgs = []string{"archive-org", "other-org"}
 	return f
 }
 
@@ -88,6 +92,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, f.accounts[f.login])
 	case r.Method == "GET" && r.URL.Path == "/user/repos":
 		f.paginate(w, r, f.login)
+	case r.Method == "GET" && r.URL.Path == "/user/orgs":
+		var list []Account
+		for _, o := range f.orgs {
+			list = append(list, Account{Login: o})
+		}
+		writeJSON(w, 200, list)
 	case r.Method == "GET" && len(parts) == 2 && parts[0] == "users":
 		if a, ok := f.accounts[strings.ToLower(parts[1])]; ok {
 			writeJSON(w, 200, a)
@@ -208,8 +218,31 @@ func runCLI(t *testing.T, srv *httptest.Server, stdin string, args ...string) re
 		args = append(args, "--api-url", srv.URL, "--token", "test-token")
 	}
 	var out, errOut bytes.Buffer
-	code := run(context.Background(), args, strings.NewReader(stdin), &out, &errOut)
+	code := run(context.Background(), args, newLineReader(stdin), &out, &errOut)
 	return result{code: code, stdout: out.String(), stderr: errOut.String(), sleeps: sleeps}
+}
+
+// lineReader returns one line per Read call, like a terminal in line mode.
+// (huh's plain-text prompts create a new scanner for every question.)
+type lineReader struct{ lines []string }
+
+func newLineReader(s string) *lineReader {
+	if s == "" {
+		return &lineReader{}
+	}
+	return &lineReader{lines: strings.SplitAfter(s, "\n")}
+}
+
+func (l *lineReader) Read(p []byte) (int, error) {
+	for len(l.lines) > 0 && l.lines[0] == "" {
+		l.lines = l.lines[1:]
+	}
+	if len(l.lines) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, l.lines[0])
+	l.lines[0] = l.lines[0][n:]
+	return n, nil
 }
 
 func writeFile(t *testing.T, content string) string {
@@ -564,5 +597,103 @@ func TestAPIErrorMessage(t *testing.T) {
 	want := "POST /repos/a/b/transfer: HTTP 422: Validation Failed (name already exists; Repository name invalid; plain)"
 	if e.Error() != want {
 		t.Errorf("got  %s\nwant %s", e.Error(), want)
+	}
+}
+
+// ---- interactive mode -------------------------------------------------------
+
+func TestInteractiveTransfer(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	// Repositories are offered least recently pushed first:
+	// 1 empty, 2 old-fork, 3 old-thing, 4 bar, 5 baz, 6 foo, 7 keep-me
+	input := strings.Join([]string{
+		"1",           // FROM: alice (you)
+		"1",           // TO: archive-org
+		"3", "5", "6", // tick old-thing, baz (name taken in archive-org), foo
+		"0", // done selecting
+		"y", // archive after moving
+		"y", // confirm
+	}, "\n") + "\n"
+	res := runCLI(t, srv, input, "interactive", "--accessible", "--interval", "0")
+	if res.code != 0 {
+		t.Fatalf("exit code = %d\nstdout:\n%s\nstderr:\n%s", res.code, res.stdout, res.stderr)
+	}
+	if want := []string{"alice/old-thing->archive-org", "alice/foo->archive-org"}; fmt.Sprint(f.transfers) != fmt.Sprint(want) {
+		t.Errorf("transfers = %v, want %v", f.transfers, want)
+	}
+	if want := []string{"archive-org/old-thing", "archive-org/foo"}; fmt.Sprint(f.archived) != fmt.Sprint(want) {
+		t.Errorf("archived = %v, want %v", f.archived, want)
+	}
+	for _, want := range []string{"From: alice  ->  To: archive-org", "archive-org/baz already exists", "Done: 2 transferred"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("stdout missing %q\n%s", want, res.stdout)
+		}
+	}
+}
+
+func TestInteractiveOtherDestinationAndCancel(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	input := strings.Join([]string{
+		"1",      // FROM: alice
+		"3",      // TO: Other...
+		"nobody", // does not exist -> asked again
+		"3",      // TO: Other...
+		"bob",    // a user
+		"6", "0", // tick foo, done
+		"n", // do not archive
+		"n", // cancel at the final confirmation
+	}, "\n") + "\n"
+	res := runCLI(t, srv, input, "interactive", "--accessible")
+	if res.code != 1 || len(f.transfers) != 0 {
+		t.Fatalf("code=%d transfers=%v\n%s\n%s", res.code, f.transfers, res.stdout, res.stderr)
+	}
+	for _, want := range []string{`"nobody" does not exist`, "From: alice  ->  To: bob", "1 to transfer", "Cancelled"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("stdout missing %q\n%s", want, res.stdout)
+		}
+	}
+}
+
+func TestInteractiveNothingSelected(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	// FROM archive-org (2), TO other-org (1: archive-org itself is not offered), select nothing
+	res := runCLI(t, srv, "2\n1\n0\nn\n", "interactive", "--accessible")
+	if res.code != 0 || len(f.transfers) != 0 || !strings.Contains(res.stdout, "No repositories selected") {
+		t.Fatalf("code=%d transfers=%v\n%s\n%s", res.code, f.transfers, res.stdout, res.stderr)
+	}
+}
+
+func TestInteractiveNeedsTerminal(t *testing.T) {
+	if res := runCLI(t, nil, "", "interactive"); res.code != 2 || !strings.Contains(res.stderr, "needs a terminal") {
+		t.Errorf("code=%d stderr=%s", res.code, res.stderr)
+	}
+	if res := runCLI(t, nil, ""); res.code != 2 || !strings.Contains(res.stderr, "Usage:") {
+		t.Errorf("no args without a terminal should print usage: code=%d stderr=%s", res.code, res.stderr)
+	}
+}
+
+func TestRepoLabel(t *testing.T) {
+	pushed := time.Date(2021, 3, 4, 0, 0, 0, 0, time.UTC)
+	r := &Repo{Name: "a-very-long-repository-name", Visibility: "private", Fork: true, Stars: 3, PushedAt: &pushed, Description: "  hello\n world "}
+	got := repoLabel(r, 10)
+	want := "a-very-lo~  2021-03-04    [private, fork, stars:3]  hello world"
+	if got != want {
+		t.Errorf("repoLabel = %q\nwant        %q", got, want)
+	}
+	if got := repoLabel(&Repo{Name: "x"}, 3); got != "x    never pushed" {
+		t.Errorf("repoLabel = %q", got)
+	}
+}
+
+func TestInteractiveInputEndsEarly(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	// An invalid answer followed by end of input must not crash.
+	res := runCLI(t, srv, "1\nxyz\n", "interactive", "--accessible")
+	if res.code != 1 || len(f.transfers) != 0 || !strings.Contains(res.stderr, "input ended") {
+		t.Fatalf("code=%d transfers=%v\n%s\n%s", res.code, f.transfers, res.stdout, res.stderr)
 	}
 }

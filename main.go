@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"time"
 )
 
@@ -44,6 +45,8 @@ const usageText = `ghbt - GitHub Bulk Transfer
 Move many GitHub repositories to another owner (usually an organization) at once.
 
 Usage:
+  ghbt                                       Interactive mode (pick repositories in the terminal)
+  ghbt interactive [flags]                   Same as above, with flags
   ghbt list     [flags]                      List repositories as an editable list
   ghbt transfer --to OWNER [flags] [REPO...]  Transfer repositories to OWNER
   ghbt version                               Print version information
@@ -53,7 +56,9 @@ Run "ghbt <command> -h" to see the flags of a command.
 Authentication (first one found is used):
   --token flag, $GH_TOKEN, $GITHUB_TOKEN, or "gh auth token" (GitHub CLI login)
 
-Typical workflow:
+Easiest: just run "ghbt" and follow the prompts.
+
+Scriptable workflow:
   ghbt list --sort pushed -o repos.txt
   # edit repos.txt and keep only the repositories you want to move
   ghbt transfer --to my-archive-org --file repos.txt --dry-run
@@ -68,10 +73,19 @@ func main() {
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usageText)
-		return 2
+		if !isTerminal(stdin) {
+			fmt.Fprint(stderr, usageText)
+			return 2
+		}
+		code := cmdInteractive(ctx, nil, stdin, stdout, stderr)
+		if runtime.GOOS == "windows" {
+			pauseBeforeExit(stdin, stdout) // keep a double-clicked console window open
+		}
+		return code
 	}
 	switch args[0] {
+	case "interactive", "i":
+		return cmdInteractive(ctx, args[1:], stdin, stdout, stderr)
 	case "list", "ls":
 		return cmdList(ctx, args[1:], stdout, stderr)
 	case "transfer", "mv":
@@ -101,19 +115,28 @@ func (c *commonFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.from, "from", "", "source owner (user or org) whose repositories are listed (default: you)")
 }
 
+func (c *commonFlags) resolvedAPIURL() string {
+	if c.apiURL != "" {
+		return c.apiURL
+	}
+	if v := getenv("GITHUB_API_URL"); v != "" {
+		return v
+	}
+	return defaultAPIURL
+}
+
 // connect resolves the token, builds a client and verifies the credentials.
 func connect(ctx context.Context, cf commonFlags, stderr io.Writer) (*Client, *Account, error) {
-	apiURL := cf.apiURL
-	if apiURL == "" {
-		apiURL = getenv("GITHUB_API_URL")
-	}
-	if apiURL == "" {
-		apiURL = defaultAPIURL
-	}
+	apiURL := cf.resolvedAPIURL()
 	token, source, err := resolveToken(ctx, cf.token, apiURL)
 	if err != nil {
 		return nil, nil, err
 	}
+	return login(ctx, apiURL, token, source, stderr)
+}
+
+// login builds a client and verifies the token by fetching the current user.
+func login(ctx context.Context, apiURL, token, source string, stderr io.Writer) (*Client, *Account, error) {
 	c := NewClient(apiURL, token, stderr)
 	me, err := c.CurrentUser(ctx)
 	if err != nil {
