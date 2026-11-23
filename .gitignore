@@ -1,0 +1,10 @@
+/dist/
+/ghbt
+/ghbt.exe
+*.test
+repos.txt
+/docs/demo/node_modules/
+/docs/demo/package-lock.json
+/docs/demo/*.json
+!/docs/demo/package.json
+/docs/demo/frames-*/

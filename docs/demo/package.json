@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Renders the README demo GIFs (see README.md in this folder)",
+  "dependencies": {
+    "@xterm/xterm": "5.5.0",
+    "playwright": "1.63.0"
+  }
+}
