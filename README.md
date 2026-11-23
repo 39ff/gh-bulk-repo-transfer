@@ -253,24 +253,23 @@ demo GIFs are recorded against a fake API as well; see [docs/demo](docs/demo).
 
 ### Releasing
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds all
-platforms with [GoReleaser](https://goreleaser.com/) and publishes a GitHub
-release with the standalone archives, the raw binaries that
-`gh extension install` downloads (`gh-bulk-repo-transfer_<tag>_<os>-<arch>`),
-and checksums. Either push a tag:
+Releases are automatic. [`.github/workflows/release.yml`](.github/workflows/release.yml)
+runs on every push to `main` (a merged pull request) that changes code, tags the
+next version and publishes a GitHub release built with
+[GoReleaser](https://goreleaser.com/): the standalone archives, the raw binaries
+that `gh extension install` downloads (`gh-bulk-repo-transfer_<tag>_<os>-<arch>`),
+and checksums.
 
-```bash
-git tag v1.0.0
-```
+- The patch version is bumped by default (`v1.2.3` → `v1.2.4`). Put `#minor` or
+  `#major` in the pull request title (or commit message) for a bigger bump.
+  The first release is `v0.1.0` (`v1.0.0` with `#major`).
+- Changes that only touch Markdown, `docs/`, `.github/` or `LICENSE` are not released.
+- To release by hand, run **Actions → Release → Run workflow** (optionally with a
+  version), or push a `v*` tag. Tags with a `-` suffix (e.g. `v1.0.0-rc.1`)
+  become pre-releases, which `gh extension install` ignores.
 
-```bash
-git push origin v1.0.0
-```
-
-or run **Actions → Release → Run workflow** and enter the version. Tags with a
-`-` suffix (e.g. `v1.0.0-rc.1`) become pre-releases, which `gh extension
-install` ignores. [`ci.yml`](.github/workflows/ci.yml) tests every push on
-Linux, macOS and Windows and uploads snapshot binaries as workflow artifacts.
+[`ci.yml`](.github/workflows/ci.yml) tests every push on Linux, macOS and Windows
+and uploads snapshot binaries as workflow artifacts.
 
 ## License
 

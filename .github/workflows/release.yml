@@ -1,17 +1,27 @@
 name: Release
 
-# Two ways to publish a release:
-#   1. Push a tag:            git tag v1.0.0 && git push origin v1.0.0
-#   2. Run this workflow manually from the Actions tab and enter a version
-#      (the tag is created for you on the selected branch).
+# Releases are published automatically:
+#   * Every push to main (e.g. a merged pull request) that changes code is
+#     released with the next version: patch by default, "#minor" or "#major"
+#     in the commit message / pull request title for a bigger bump.
+#     Changes that only touch docs, Markdown or .github/ are not released.
+#   * Run this workflow manually (Actions -> Release -> Run workflow) to release
+#     the selected branch, optionally with an explicit version.
+#   * Push a v* tag yourself to release exactly that tag.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/**"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g. v1.0.0)"
-        required: true
+        description: "Version to release, e.g. v1.2.0 (empty = next patch version)"
+        required: false
         type: string
 
 permissions:
@@ -32,23 +42,42 @@ jobs:
         with:
           go-version: stable
       - run: go test ./...
-      - name: Create tag (manual run only)
-        if: github.event_name == 'workflow_dispatch'
+
+      - name: Decide the version
+        id: version
         env:
-          VERSION: ${{ inputs.version }}
+          INPUT_VERSION: ${{ inputs.version }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::version must look like v1.2.3 (got '$VERSION')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"; create=false
+          elif [ -n "$INPUT_VERSION" ]; then
+            tag="$INPUT_VERSION"; create=true
+          else
+            tag=$(.github/scripts/next-version.sh "$COMMIT_MSG"); create=true
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version must look like v1.2.3 (got '$tag')"
             exit 1
           fi
-          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-            echo "::error::tag $VERSION already exists"
+          if [ "$create" = true ] && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::tag $tag already exists"
             exit 1
           fi
+          echo "Releasing $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "create=$create" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag
+        if: steps.version.outputs.create == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser

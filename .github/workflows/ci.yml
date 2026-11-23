@@ -29,6 +29,9 @@ jobs:
       - name: Check formatting
         if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "Run gofmt -w ."; exit 1; }
+      - name: Test the release version script
+        if: runner.os == 'Linux'
+        run: .github/scripts/next-version_test.sh
       - run: go vet ./...
       - run: go test ./...
 

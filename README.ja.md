@@ -225,17 +225,12 @@ go test ./...
 
 ### リリース方法
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) が [GoReleaser](https://goreleaser.com/) で全プラットフォーム分をビルドし、GitHub Release を作成します。添付されるのは、単体版のアーカイブ、`gh extension install` がダウンロードする実行ファイル（`gh-bulk-repo-transfer_<tag>_<os>-<arch>`）、チェックサムです。タグを push するか、
+リリースは自動です。`main` へ push されたとき（PR をマージしたとき）にコードの変更が含まれていれば、[`.github/workflows/release.yml`](.github/workflows/release.yml) が次のバージョンのタグを付け、[GoReleaser](https://goreleaser.com/) でビルドして GitHub Release を作成します。添付されるのは、単体版のアーカイブ、`gh extension install` がダウンロードする実行ファイル（`gh-bulk-repo-transfer_<tag>_<os>-<arch>`）、チェックサムです。
 
-```bash
-git tag v1.0.0
-```
+- 通常は patch 版が上がります（`v1.2.3` → `v1.2.4`）。PR のタイトル（またはコミットメッセージ）に `#minor` / `#major` と書くと、その部分が上がります。最初のリリースは `v0.1.0`（`#major` 付きなら `v1.0.0`）です
+- Markdown・`docs/`・`.github/`・`LICENSE` だけの変更ではリリースしません
+- 手動でリリースしたいときは **Actions → Release → Run workflow**（バージョン指定も可）を実行するか、`v*` タグを push してください。`v1.0.0-rc.1` のように `-` が付いたタグはプレリリースになり、`gh extension install` の対象になりません
 
-```bash
-git push origin v1.0.0
-```
-
-**Actions → Release → Run workflow** からバージョンを入力して実行してください。`v1.0.0-rc.1` のように `-` が付いたタグはプレリリースになり、`gh extension install` の対象になりません。
 [`ci.yml`](.github/workflows/ci.yml) は push ごとに Linux・macOS・Windows でテストし、スナップショットのバイナリを Artifacts にアップロードします。
 
 ## ライセンス
