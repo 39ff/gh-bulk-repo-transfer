@@ -1,36 +1,57 @@
-# ghbt — GitHub Bulk Transfer
+# gh-bulk-repo-transfer
 
-[![CI](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml/badge.svg)](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ShelterLLC/githubBulkTransfer?sort=semver)](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest)
+[![CI](https://github.com/39ff/gh-bulk-repo-transfer/actions/workflows/ci.yml/badge.svg)](https://github.com/39ff/gh-bulk-repo-transfer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/39ff/gh-bulk-repo-transfer?sort=semver)](https://github.com/39ff/gh-bulk-repo-transfer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **English** | [日本語](README.ja.md)
 
-Move the GitHub repositories you no longer need into another organization — an
-"archive" org, for example — in one go. Pick them in an interactive terminal UI,
-or script it.
+A [GitHub CLI](https://cli.github.com/) extension (and standalone tool) that moves
+the repositories you no longer need into another organization — an "archive"
+org, for example — in one go. Pick them in an interactive terminal UI, or script it.
 
 <p align="center">
-  <img src="docs/demo-interactive.gif" alt="ghbt interactive mode: choose source and destination, tick repositories, review the plan, transfer" width="806">
+  <img src="docs/demo-interactive.gif" alt="gh bulk-repo-transfer interactive mode: choose source and destination, tick repositories, review the plan, transfer" width="900">
 </p>
 
-- **Interactive**: run `ghbt`, choose *from* (your account or an organization) and
-  *to*, tick repositories in a filterable list sorted by last push, confirm.
+- **Interactive**: choose *from* (your account or an organization, labelled
+  owner/member) and *to*, tick repositories in a filterable list sorted by last
+  push, confirm.
 - **Safe by default**: shows a checked plan before doing anything — name already
   taken in the destination, already moved, or no admin rights are skipped or
   reported, and nothing happens until you confirm. `--dry-run` is available too.
-- **Scriptable**: `ghbt list` exports an editable list, `ghbt transfer` takes a
-  file, arguments or filters (`--pushed-before`, `--forks`, `--match`, ...).
+- **Scriptable**: `list` exports an editable list, `transfer` takes a file,
+  arguments or filters (`--pushed-before`, `--forks`, `--match`, ...).
 - **Optional archiving** of each repository after it has been moved.
 - Waits and retries automatically when GitHub's rate limits kick in.
-- Single binary for Windows, macOS and Linux (amd64 / arm64). Also works with
-  GitHub Enterprise Server (`--api-url`).
+- Windows, macOS and Linux (amd64 / arm64). Also works with GitHub Enterprise
+  Server (`--api-url`).
+
+GitHub CLI itself has no command for transferring repositories
+(`gh repo` can archive, rename or delete, but not transfer); this fills that gap.
 
 ## Install
 
-Download the archive for your platform from the
-[latest release](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest),
+### As a GitHub CLI extension (recommended)
+
+```bash
+gh extension install 39ff/gh-bulk-repo-transfer
+```
+
+```bash
+gh bulk-repo-transfer
+```
+
+It uses your `gh` login, so there is nothing else to set up. Upgrade with
+`gh extension upgrade bulk-repo-transfer`.
+
+### Standalone binary
+
+Without `gh`, download the archive for your platform from the
+[latest release](https://github.com/39ff/gh-bulk-repo-transfer/releases/latest),
 extract it and put `ghbt` (`ghbt.exe` on Windows) somewhere on your `PATH`.
+`ghbt` is the same program: wherever this README says `gh bulk-repo-transfer`,
+type `ghbt` instead.
 
 | Platform | File |
 | --- | --- |
@@ -45,30 +66,25 @@ On macOS, if the binary is blocked because it is not notarized:
 xattr -d com.apple.quarantine ./ghbt
 ```
 
-With Go 1.25 or newer you can also install from source:
+With Go 1.25 or newer you can also build it yourself:
 
 ```bash
-go install github.com/ShelterLLC/githubBulkTransfer/cmd/ghbt@latest
+go install github.com/39ff/gh-bulk-repo-transfer/cmd/ghbt@latest
 ```
 
 ## Quick start
 
 ```bash
-gh auth login
+gh bulk-repo-transfer
 ```
 
-```bash
-ghbt
-```
-
-That's it: `ghbt` picks up the [GitHub CLI](https://cli.github.com/) login
-(see [Authentication](#authentication) for other options) and walks you through:
+You are walked through:
 
 1. **Move repositories FROM** — your own account, or an organization you belong
-   to. Organizations are labelled `(owner)` / `(member)`.
+   to. Organizations are labelled `(owner)` / `(member)`, owners first.
 2. **Move repositories TO** — the destination organization.
 3. **Select repositories** — least recently pushed first, with visibility, fork,
-   archived and star information.
+   archived and star information. Only repositories you are an admin of are shown.
 4. **Archive them after moving?**
 5. **Review** the checked plan and choose **Transfer** or **Cancel**.
 
@@ -82,33 +98,34 @@ That's it: `ghbt` picks up the [GitHub CLI](https://cli.github.com/) login
 | `shift+tab` | Back to the previous question on the same screen |
 | `ctrl+c` | Quit (nothing is transferred while you are still choosing) |
 
-On Windows you can also just double-click `ghbt.exe`. If the full-screen UI does
-not work in your terminal, use numbered prompts instead:
+If the full-screen UI does not work in your terminal, use numbered prompts:
 
 ```bash
-ghbt interactive --accessible
+gh bulk-repo-transfer interactive --accessible
 ```
+
+With the standalone binary on Windows you can also just double-click `ghbt.exe`.
 
 ## Command-line usage
 
 <p align="center">
-  <img src="docs/demo-cli.gif" alt="ghbt list and ghbt transfer on the command line" width="806">
+  <img src="docs/demo-cli.gif" alt="list and transfer on the command line" width="900">
 </p>
 
 ### Edit a list, then transfer it
 
 ```bash
-ghbt list --sort pushed -o repos.txt
+gh bulk-repo-transfer list --sort pushed -o repos.txt
 ```
 
 `repos.txt` contains one repository per line. Delete the lines (or comment them
 out with `#`) of the repositories you want to **keep**:
 
 ```text
-# 4 of 4 repositories owned by alice (ghbt list, 2026-11-23)
+# 4 of 4 repositories owned by alice (gh bulk-repo-transfer list, 2026-11-23)
 # Keep only the lines of repositories you want to TRANSFER.
 # Delete a line (or put '#' in front of it) to leave that repository where it is.
-# Then run: ghbt transfer --to <ORG> --file <this file> --dry-run
+# Then run: gh bulk-repo-transfer transfer --to <ORG> --file <this file> --dry-run
 alice/jquery-playground  # public  fork  pushed:2015-06-12  stars:0
 alice/old-blog           # public  pushed:2017-03-21  stars:0  Jekyll blog
 alice/ml-experiments     # private  pushed:2019-11-30  stars:0
@@ -116,17 +133,17 @@ alice/dotfiles           # public  pushed:2026-10-28  stars:8  My dotfiles
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --file repos.txt --dry-run
+gh bulk-repo-transfer transfer --to my-archive-org --file repos.txt --dry-run
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --file repos.txt
+gh bulk-repo-transfer transfer --to my-archive-org --file repos.txt
 ```
 
 ### Name repositories directly
 
 ```bash
-ghbt transfer --to my-archive-org old-project another-repo alice/third-repo
+gh bulk-repo-transfer transfer --to my-archive-org old-project another-repo alice/third-repo
 ```
 
 `NAME`, `OWNER/NAME`, `https://github.com/OWNER/NAME` and
@@ -139,27 +156,27 @@ Without a file or arguments, filters (or `--all`) select from all repositories
 of `--from`:
 
 ```bash
-ghbt transfer --to my-archive-org --pushed-before 2023-01-01 --forks exclude --archive
+gh bulk-repo-transfer transfer --to my-archive-org --pushed-before 2023-01-01 --forks exclude --archive
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --match '^test-'
+gh bulk-repo-transfer transfer --to my-archive-org --match '^test-'
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --all --exclude keep
+gh bulk-repo-transfer transfer --to my-archive-org --all --exclude keep
 ```
 
-The same filters work with `ghbt list`, so you can preview the selection first.
+The same filters work with `list`, so you can preview the selection first.
 
 ### Commands and flags
 
 ```text
-ghbt                                       interactive mode
-ghbt interactive [flags]                   interactive mode with flags
-ghbt list     [flags]                      list repositories (editable text or JSON)
-ghbt transfer --to OWNER [flags] [REPO...]  transfer repositories to OWNER
-ghbt version                               print the version
+gh bulk-repo-transfer                                       interactive mode
+gh bulk-repo-transfer interactive [flags]                   interactive mode with flags
+gh bulk-repo-transfer list     [flags]                      list repositories (editable text or JSON)
+gh bulk-repo-transfer transfer --to OWNER [flags] [REPO...]  transfer repositories to OWNER
+gh bulk-repo-transfer version                               print the version
 ```
 
 Common flags:
@@ -197,7 +214,7 @@ The first token found is used:
 1. `--token`
 2. `GH_TOKEN`
 3. `GITHUB_TOKEN`
-4. the GitHub CLI login (`gh auth token`)
+4. the GitHub CLI login (`gh auth token`) — always the case for the extension
 5. interactive mode only: you are asked to paste one (it is not stored)
 
 If you use a personal access token, create a **classic** token with the `repo`
@@ -220,7 +237,7 @@ Required permissions:
 - Repositories whose name already exists in the destination are skipped.
 - Transfers to another **user** must be accepted by that user by email.
 - To undo, transfer back:
-  `ghbt transfer --from my-archive-org --to <your-user> REPO...`
+  `gh bulk-repo-transfer transfer --from my-archive-org --to <your-user> REPO...`
 
 See GitHub's documentation:
 [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository).
@@ -238,7 +255,9 @@ demo GIFs are recorded against a fake API as well; see [docs/demo](docs/demo).
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) builds all
 platforms with [GoReleaser](https://goreleaser.com/) and publishes a GitHub
-release with checksums. Either push a tag:
+release with the standalone archives, the raw binaries that
+`gh extension install` downloads (`gh-bulk-repo-transfer_<tag>_<os>-<arch>`),
+and checksums. Either push a tag:
 
 ```bash
 git tag v1.0.0
@@ -248,9 +267,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-or run **Actions → Release → Run workflow** and enter the version.
-[`ci.yml`](.github/workflows/ci.yml) tests every push on Linux, macOS and
-Windows and uploads snapshot binaries as workflow artifacts.
+or run **Actions → Release → Run workflow** and enter the version. Tags with a
+`-` suffix (e.g. `v1.0.0-rc.1`) become pre-releases, which `gh extension
+install` ignores. [`ci.yml`](.github/workflows/ci.yml) tests every push on
+Linux, macOS and Windows and uploads snapshot binaries as workflow artifacts.
 
 ## License
 

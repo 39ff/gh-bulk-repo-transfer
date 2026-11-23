@@ -1,28 +1,45 @@
-# ghbt — GitHub Bulk Transfer
+# gh-bulk-repo-transfer
 
-[![CI](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml/badge.svg)](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ShelterLLC/githubBulkTransfer?sort=semver)](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest)
+[![CI](https://github.com/39ff/gh-bulk-repo-transfer/actions/workflows/ci.yml/badge.svg)](https://github.com/39ff/gh-bulk-repo-transfer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/39ff/gh-bulk-repo-transfer?sort=semver)](https://github.com/39ff/gh-bulk-repo-transfer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | **日本語**
 
-使わなくなった GitHub リポジトリを、別の Organization（たとえば「アーカイブ用 Org」）へまとめて移動（Transfer）するツールです。
+使わなくなった GitHub リポジトリを、別の Organization（たとえば「アーカイブ用 Org」）へまとめて移動（Transfer）する [GitHub CLI](https://cli.github.com/) 拡張機能です。単体のツールとしても使えます。
 ターミナル上の対話画面で選んで移動することも、コマンドやスクリプトで一括処理することもできます。
 
 <p align="center">
-  <img src="docs/demo-interactive.gif" alt="ghbt の対話モード: 移動元と移動先を選び、リポジトリにチェックを付け、確認して移動" width="806">
+  <img src="docs/demo-interactive.gif" alt="gh bulk-repo-transfer の対話モード: 移動元と移動先を選び、リポジトリにチェックを付け、確認して移動" width="900">
 </p>
 
-- **対話モード**: `ghbt` と打つだけ。移動元（自分のアカウント / 所属 Org）と移動先を選び、最終 push が古い順に並んだ一覧からチェックを付けて移動できます
+- **対話モード**: 移動元（自分のアカウント / 所属 Org。owner / member を表示）と移動先を選び、最終 push が古い順に並んだ一覧からチェックを付けて移動できます
 - **安全設計**: 実行前に必ず事前チェック済みの計画を表示します。移動先に同名リポジトリがある・移動済み・admin 権限がない、などはスキップまたはエラーとして表示し、確認するまで何も移動しません（`--dry-run` もあります）
-- **スクリプト向け**: `ghbt list` で編集できる一覧を出力し、`ghbt transfer` でファイル・引数・条件（`--pushed-before`、`--forks`、`--match` など）を指定して移動できます
+- **スクリプト向け**: `list` で編集できる一覧を出力し、`transfer` でファイル・引数・条件（`--pushed-before`、`--forks`、`--match` など）を指定して移動できます
 - 移動後に**アーカイブ**することもできます
 - GitHub のレートリミットに当たったら自動で待って再試行します
-- Windows / macOS / Linux（amd64・arm64）対応の単一バイナリ。GitHub Enterprise Server でも使えます（`--api-url`）
+- Windows / macOS / Linux（amd64・arm64）対応。GitHub Enterprise Server でも使えます（`--api-url`）
+
+GitHub CLI 本体にはリポジトリを移動するコマンドがありません（`gh repo` でできるのはアーカイブ・名前変更・削除などで、移動はできません）。この拡張機能はそこを補います。
 
 ## インストール
 
-[最新のリリース](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest)から OS に合ったファイルをダウンロードして展開し、`ghbt`（Windows は `ghbt.exe`）を PATH の通った場所に置いてください。
+### GitHub CLI 拡張機能として（おすすめ）
+
+```bash
+gh extension install 39ff/gh-bulk-repo-transfer
+```
+
+```bash
+gh bulk-repo-transfer
+```
+
+`gh` のログイン情報をそのまま使うので、ほかに設定は要りません。更新は `gh extension upgrade bulk-repo-transfer` です。
+
+### 単体のバイナリとして
+
+`gh` を使わない場合は、[最新のリリース](https://github.com/39ff/gh-bulk-repo-transfer/releases/latest)から OS に合ったファイルをダウンロードして展開し、`ghbt`（Windows は `ghbt.exe`）を PATH の通った場所に置いてください。
+`ghbt` は同じプログラムです。この README の `gh bulk-repo-transfer` を `ghbt` に読み替えて使えます。
 
 | OS | ファイル |
 | --- | --- |
@@ -37,27 +54,23 @@ macOS で「開発元を検証できません」と出る場合は、隔離属�
 xattr -d com.apple.quarantine ./ghbt
 ```
 
-Go 1.25 以上があれば、ソースからもインストールできます。
+Go 1.25 以上があれば、自分でビルドしてインストールすることもできます。
 
 ```bash
-go install github.com/ShelterLLC/githubBulkTransfer/cmd/ghbt@latest
+go install github.com/39ff/gh-bulk-repo-transfer/cmd/ghbt@latest
 ```
 
 ## すぐに使う
 
 ```bash
-gh auth login
+gh bulk-repo-transfer
 ```
 
-```bash
-ghbt
-```
+次の順に進みます。
 
-これだけです。`ghbt` は [GitHub CLI](https://cli.github.com/) のログイン情報を使い（他の方法は[認証](#認証)を参照）、次の順に進みます。
-
-1. **Move repositories FROM**: 移動元を選びます。自分のアカウントか、所属している Organization（`(owner)` / `(member)` を表示）
+1. **Move repositories FROM**: 移動元を選びます。自分のアカウントか、所属している Organization（`(owner)` / `(member)` を表示し、owner の Org を先に並べます）
 2. **Move repositories TO**: 移動先の Organization を選びます
-3. **Select repositories**: 移動するリポジトリにチェックを付けます（最終 push が古い順。公開範囲・fork・アーカイブ済み・スター数も表示）
+3. **Select repositories**: 移動するリポジトリにチェックを付けます（最終 push が古い順。公開範囲・fork・アーカイブ済み・スター数も表示）。自分が admin のリポジトリだけが表示されます
 4. **Archive them after moving?**: 移動後にアーカイブするか
 5. 事前チェックの結果を確認し、**Transfer**（実行）か **Cancel**（中止）を選びます
 
@@ -71,31 +84,33 @@ ghbt
 | `shift+tab` | 同じ画面の前の項目に戻る |
 | `ctrl+c` | 中止（選んでいる途中なら何も移動しません） |
 
-Windows では `ghbt.exe` をダブルクリックしても起動できます。画面の表示が崩れるターミナルでは、番号で選ぶシンプルなモードを使ってください。
+画面の表示が崩れるターミナルでは、番号で選ぶシンプルなモードを使ってください。
 
 ```bash
-ghbt interactive --accessible
+gh bulk-repo-transfer interactive --accessible
 ```
+
+単体バイナリの場合、Windows では `ghbt.exe` をダブルクリックしても起動できます。
 
 ## コマンドラインで使う
 
 <p align="center">
-  <img src="docs/demo-cli.gif" alt="コマンドラインでの ghbt list と ghbt transfer" width="806">
+  <img src="docs/demo-cli.gif" alt="コマンドラインでの list と transfer" width="900">
 </p>
 
 ### 一覧ファイルを編集して移動する
 
 ```bash
-ghbt list --sort pushed -o repos.txt
+gh bulk-repo-transfer list --sort pushed -o repos.txt
 ```
 
 `repos.txt` は 1 行に 1 リポジトリです。**残したい**（移動しない）リポジトリの行を消すか、先頭に `#` を付けてください。
 
 ```text
-# 4 of 4 repositories owned by alice (ghbt list, 2026-11-23)
+# 4 of 4 repositories owned by alice (gh bulk-repo-transfer list, 2026-11-23)
 # Keep only the lines of repositories you want to TRANSFER.
 # Delete a line (or put '#' in front of it) to leave that repository where it is.
-# Then run: ghbt transfer --to <ORG> --file <this file> --dry-run
+# Then run: gh bulk-repo-transfer transfer --to <ORG> --file <this file> --dry-run
 alice/jquery-playground  # public  fork  pushed:2015-06-12  stars:0
 alice/old-blog           # public  pushed:2017-03-21  stars:0  Jekyll blog
 alice/ml-experiments     # private  pushed:2019-11-30  stars:0
@@ -103,17 +118,17 @@ alice/dotfiles           # public  pushed:2026-10-28  stars:8  My dotfiles
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --file repos.txt --dry-run
+gh bulk-repo-transfer transfer --to my-archive-org --file repos.txt --dry-run
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --file repos.txt
+gh bulk-repo-transfer transfer --to my-archive-org --file repos.txt
 ```
 
 ### リポジトリを直接指定する
 
 ```bash
-ghbt transfer --to my-archive-org old-project another-repo alice/third-repo
+gh bulk-repo-transfer transfer --to my-archive-org old-project another-repo alice/third-repo
 ```
 
 `NAME`、`OWNER/NAME`、`https://github.com/OWNER/NAME`、`git@github.com:OWNER/NAME.git` のどれでも指定できます。`NAME` だけの場合は `--from`（省略時は自分）のリポジトリとして扱います。
@@ -123,27 +138,27 @@ ghbt transfer --to my-archive-org old-project another-repo alice/third-repo
 ファイルや引数を指定しない場合は、条件（または `--all`）で `--from` の全リポジトリから選びます。
 
 ```bash
-ghbt transfer --to my-archive-org --pushed-before 2023-01-01 --forks exclude --archive
+gh bulk-repo-transfer transfer --to my-archive-org --pushed-before 2023-01-01 --forks exclude --archive
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --match '^test-'
+gh bulk-repo-transfer transfer --to my-archive-org --match '^test-'
 ```
 
 ```bash
-ghbt transfer --to my-archive-org --all --exclude keep
+gh bulk-repo-transfer transfer --to my-archive-org --all --exclude keep
 ```
 
-同じ条件は `ghbt list` でも使えるので、先に対象を確認できます。
+同じ条件は `list` でも使えるので、先に対象を確認できます。
 
 ### コマンドとオプション
 
 ```text
-ghbt                                       対話モード
-ghbt interactive [flags]                   対話モード（オプション付き）
-ghbt list     [flags]                      リポジトリ一覧（編集用テキスト / JSON）
-ghbt transfer --to OWNER [flags] [REPO...]  リポジトリを OWNER へ移動
-ghbt version                               バージョン表示
+gh bulk-repo-transfer                                       対話モード
+gh bulk-repo-transfer interactive [flags]                   対話モード（オプション付き）
+gh bulk-repo-transfer list     [flags]                      リポジトリ一覧（編集用テキスト / JSON）
+gh bulk-repo-transfer transfer --to OWNER [flags] [REPO...]  リポジトリを OWNER へ移動
+gh bulk-repo-transfer version                               バージョン表示
 ```
 
 共通オプション:
@@ -180,7 +195,7 @@ ghbt version                               バージョン表示
 1. `--token`
 2. `GH_TOKEN`
 3. `GITHUB_TOKEN`
-4. GitHub CLI のログイン情報（`gh auth token`）
+4. GitHub CLI のログイン情報（`gh auth token`）。拡張機能として使う場合は通常これです
 5. 対話モードのみ: どれも無ければ画面で入力を求めます（保存はしません）
 
 Personal Access Token を使う場合は **classic** トークンに `repo` スコープを付けてください（対話モードで所属 Org と権限を一覧表示するには `read:org` も必要です。`gh auth login` のトークンには両方付いています）。fine-grained トークンは 1 つのオーナーにしかアクセスできないため、通常は個人アカウントから Organization への移動に使えません。Organization が SAML SSO を使っている場合は、トークンの SSO 認可も必要です。
@@ -196,7 +211,7 @@ Personal Access Token を使う場合は **classic** トークンに `repo` ス�
 - 旧 URL（Web と git の URL）は新しい場所へリダイレクトされます。ただし旧オーナー側に同じ名前のリポジトリを作るとリダイレクトは切れます。GitHub Pages の URL はリダイレクトされません
 - 移動先に同じ名前のリポジトリがあるものはスキップします
 - 移動先が（自分以外の）**ユーザー**の場合は、相手がメールで承認するまで移動は完了しません
-- 元に戻すときは逆向きに移動します: `ghbt transfer --from my-archive-org --to <自分のユーザー名> REPO...`
+- 元に戻すときは逆向きに移動します: `gh bulk-repo-transfer transfer --from my-archive-org --to <自分のユーザー名> REPO...`
 
 詳しくは GitHub のドキュメント [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository) を参照してください。
 
@@ -210,7 +225,7 @@ go test ./...
 
 ### リリース方法
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) が [GoReleaser](https://goreleaser.com/) で全プラットフォーム分をビルドし、チェックサム付きの GitHub Release を作成します。タグを push するか、
+[`.github/workflows/release.yml`](.github/workflows/release.yml) が [GoReleaser](https://goreleaser.com/) で全プラットフォーム分をビルドし、GitHub Release を作成します。添付されるのは、単体版のアーカイブ、`gh extension install` がダウンロードする実行ファイル（`gh-bulk-repo-transfer_<tag>_<os>-<arch>`）、チェックサムです。タグを push するか、
 
 ```bash
 git tag v1.0.0
@@ -220,7 +235,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-**Actions → Release → Run workflow** からバージョンを入力して実行してください。
+**Actions → Release → Run workflow** からバージョンを入力して実行してください。`v1.0.0-rc.1` のように `-` が付いたタグはプレリリースになり、`gh extension install` の対象になりません。
 [`ci.yml`](.github/workflows/ci.yml) は push ごとに Linux・macOS・Windows でテストし、スナップショットのバイナリを Artifacts にアップロードします。
 
 ## ライセンス

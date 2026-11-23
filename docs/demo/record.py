@@ -2,14 +2,14 @@
 # into a JSON timeline of [seconds, text] events.
 import codecs, fcntl, json, os, pty, random, select, struct, subprocess, sys, termios, time
 
-COLS, ROWS = 86, 26
+COLS, ROWS = 96, 26
 binary, scenario, out = sys.argv[1], sys.argv[2], sys.argv[3]
 random.seed(7)
 events, t0 = [], time.time()
 def now(): return round(time.time() - t0, 3)
 def emit(s): events.append([now(), s])
 
-PROMPT = "\x1b[1;36m~/code\x1b[0m \x1b[1;32m$\x1b[0m "
+PROMPT = "\x1b[1;32m$\x1b[0m "
 def type_cmd(cmd, pause=0.7):
     emit(PROMPT); time.sleep(pause)
     for ch in cmd:
@@ -60,7 +60,7 @@ time.sleep(0.6)
 DOWN, LEFT, ENTER, SPACE = b"\x1b[B", b"\x1b[D", b"\r", b" "
 
 if scenario == "interactive":
-    type_cmd("ghbt")
+    type_cmd("gh bulk-repo-transfer")
     steps = [("Move repositories FROM", 1.8, ENTER),          # alice (your account)
              ("Move repositories TO", 1.6, ENTER),             # alice-archive (owner)
              ("Select repositories", 1.6, SPACE)]              # jquery-playground
@@ -74,10 +74,10 @@ if scenario == "interactive":
     run(["interactive", "--interval", "300ms"], steps, port)
     time.sleep(0.2); emit(PROMPT); time.sleep(3.5)
 elif scenario == "cli":
-    type_cmd("ghbt list --sort pushed --pushed-before 2021-01-01")
+    type_cmd("gh bulk-repo-transfer list --sort pushed --pushed-before 2021-01-01")
     run(["list", "--sort", "pushed", "--pushed-before", "2021-01-01"], [], port)
     time.sleep(2.4)
-    type_cmd("ghbt transfer --to alice-archive --pushed-before 2021-01-01 --forks exclude")
+    type_cmd("gh bulk-repo-transfer transfer --to alice-archive --pushed-before 2021-01-01 --forks exclude")
     run(["transfer", "--to", "alice-archive", "--pushed-before", "2021-01-01", "--forks", "exclude", "--interval", "300ms"],
         [("[y/N]", 2.4, b"y"), (None, 0.5, b"\r")], port)
     time.sleep(0.2); emit(PROMPT); time.sleep(3.5)
