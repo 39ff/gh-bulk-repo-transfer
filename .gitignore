@@ -1,0 +1,5 @@
+/dist/
+/ghbt
+/ghbt.exe
+*.test
+repos.txt
