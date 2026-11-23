@@ -5,7 +5,7 @@ project_name: ghbt
 
 builds:
   - id: ghbt
-    main: .
+    main: ./cmd/ghbt
     binary: ghbt
     env:
       - CGO_ENABLED=0
@@ -25,6 +25,8 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - README.ja.md
+      - LICENSE
 
 checksum:
   name_template: checksums.txt

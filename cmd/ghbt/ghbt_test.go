@@ -22,15 +22,17 @@ import (
 // ---- fake GitHub API -------------------------------------------------------
 
 type fakeGitHub struct {
-	mu        sync.Mutex
-	login     string
-	accounts  map[string]Account // lower(login) -> account
-	repos     map[string]*Repo   // lower(full name) -> repo
-	redirects map[string]string  // lower(old full name) -> new full name
-	transfers []string
-	archived  []string
-	orgs      []string // organizations the user belongs to
-	perPage   int
+	mu               sync.Mutex
+	login            string
+	accounts         map[string]Account // lower(login) -> account
+	repos            map[string]*Repo   // lower(full name) -> repo
+	redirects        map[string]string  // lower(old full name) -> new full name
+	transfers        []string
+	archived         []string
+	orgs             []string // organizations the user belongs to
+	ownerOf          map[string]bool
+	noMembershipsAPI bool // simulate a token without read:org
+	perPage          int
 	// rateLimitNextTransfer makes the next transfer fail once with a secondary rate limit.
 	rateLimitNextTransfer bool
 	// archive404 makes PATCH return 404 this many times (transfer still in progress).
@@ -50,6 +52,7 @@ func newFakeGitHub() *fakeGitHub {
 	f.addAccount("bob", "User")
 	f.addAccount("other-org", "Organization")
 	f.orgs = []string{"archive-org", "other-org"}
+	f.ownerOf = map[string]bool{"archive-org": true}
 	return f
 }
 
@@ -92,6 +95,20 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, f.accounts[f.login])
 	case r.Method == "GET" && r.URL.Path == "/user/repos":
 		f.paginate(w, r, f.login)
+	case r.Method == "GET" && r.URL.Path == "/user/memberships/orgs":
+		if f.noMembershipsAPI {
+			writeJSON(w, 403, map[string]string{"message": "Resource not accessible"})
+			return
+		}
+		var list []map[string]any
+		for _, o := range f.orgs {
+			role := "member"
+			if f.ownerOf[o] {
+				role = "admin"
+			}
+			list = append(list, map[string]any{"role": role, "state": "active", "organization": Account{Login: o}})
+		}
+		writeJSON(w, 200, list)
 	case r.Method == "GET" && r.URL.Path == "/user/orgs":
 		var list []Account
 		for _, o := range f.orgs {
@@ -591,6 +608,14 @@ func TestResolveToken(t *testing.T) {
 	}
 }
 
+func TestAPIErrorNonJSONBody(t *testing.T) {
+	body := "<html>\n  <head><title>Bad Gateway</title></head>\n  <body>" + strings.Repeat("x", 300) + "</body>\n</html>"
+	got := newAPIError("GET", "/user", 502, []byte(body)).Error()
+	if strings.Contains(got, "\n") || !strings.HasPrefix(got, "GET /user: HTTP 502: <html> <head><title>Bad Gateway</title></head>") || !strings.HasSuffix(got, "...") {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestAPIErrorMessage(t *testing.T) {
 	body := `{"message":"Validation Failed","errors":[{"resource":"Repository","code":"custom","message":"name already exists"},{"resource":"Repository","field":"name","code":"invalid"},"plain"]}`
 	e := newAPIError("POST", "/repos/a/b/transfer", 422, []byte(body))
@@ -638,8 +663,7 @@ func TestInteractiveOtherDestinationAndCancel(t *testing.T) {
 	input := strings.Join([]string{
 		"1",      // FROM: alice
 		"3",      // TO: Other...
-		"nobody", // does not exist -> asked again
-		"3",      // TO: Other...
+		"nobody", // does not exist -> the name is asked again
 		"bob",    // a user
 		"6", "0", // tick foo, done
 		"n", // do not archive
@@ -695,5 +719,54 @@ func TestInteractiveInputEndsEarly(t *testing.T) {
 	res := runCLI(t, srv, "1\nxyz\n", "interactive", "--accessible")
 	if res.code != 1 || len(f.transfers) != 0 || !strings.Contains(res.stderr, "input ended") {
 		t.Fatalf("code=%d transfers=%v\n%s\n%s", res.code, f.transfers, res.stdout, res.stderr)
+	}
+}
+
+func TestInteractiveFromFlagAndOwnerLabels(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	f.ownerOf = map[string]bool{"other-org": true} // owner orgs are listed first
+	// --from skips the FROM question; TO offers: 1 other-org (owner), 2 Other...
+	res := runCLI(t, srv, "1\n0\nn\n", "interactive", "--accessible", "--from", "archive-org")
+	if res.code != 0 {
+		t.Fatalf("code=%d\n%s\n%s", res.code, res.stdout, res.stderr)
+	}
+	for _, want := range []string{"1. other-org (owner)", "From: archive-org  ->  To: other-org", "No repositories selected"} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("stdout missing %q\n%s", want, res.stdout)
+		}
+	}
+	if strings.Contains(res.stdout, "Move repositories FROM") {
+		t.Errorf("FROM should not be asked with --from:\n%s", res.stdout)
+	}
+}
+
+func TestMyOrgs(t *testing.T) {
+	f, srv := standardFake()
+	defer srv.Close()
+	f.orgs = []string{"b-member", "z-owner", "a-member"}
+	f.ownerOf = map[string]bool{"z-owner": true}
+	c := NewClient(srv.URL, "test-token", io.Discard)
+	got, err := c.MyOrgs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[{z-owner admin} {a-member member} {b-member member}]"; fmt.Sprint(got) != want {
+		t.Errorf("MyOrgs = %v, want %s", got, want)
+	}
+	if l := got[0].label(); l != "z-owner (owner)" {
+		t.Errorf("label = %q", l)
+	}
+
+	f.noMembershipsAPI = true // fall back to /user/orgs without roles
+	got, err = c.MyOrgs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "[{a-member } {b-member } {z-owner }]"; fmt.Sprint(got) != want {
+		t.Errorf("fallback MyOrgs = %v, want %s", got, want)
+	}
+	if l := got[0].label(); l != "a-member" {
+		t.Errorf("label = %q", l)
 	}
 }

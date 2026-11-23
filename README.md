@@ -1,248 +1,244 @@
-# githubBulkTransfer (`ghbt`)
+# ghbt — GitHub Bulk Transfer
 
-いらない GitHub リポジトリを、指定した Organization へまとめて移動（Transfer）するための CLI ツールです。
-GitHub REST API の [Transfer a repository](https://docs.github.com/en/rest/repos/repos#transfer-a-repository) を順番に呼び出します。
+[![CI](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml/badge.svg)](https://github.com/ShelterLLC/githubBulkTransfer/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ShelterLLC/githubBulkTransfer?sort=semver)](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-- Windows / macOS / Linux（amd64・arm64）対応の単一バイナリ（ランタイムのインストール不要）
-- **対話モード**: `ghbt` と打つだけで、移動元・移動先を選び、リポジトリをチェックボックスで選んで移動できます
-- スクリプト向けに、一覧をテキストファイルに書き出し → 残したい行だけ消す → 一括移動、という流れも使えます
-- 実行前に必ず「何を移動するか」を表示し、確認してから移動します（`--dry-run` あり）
-- 移動先に同名リポジトリがある / 既に移動済み / 権限がない などは事前チェックでスキップ
-- GitHub のレートリミットに当たった場合は自動で待って再試行
-- 移動後にアーカイブ（`--archive`）も可能
+**English** | [日本語](README.ja.md)
 
-## インストール
+Move the GitHub repositories you no longer need into another organization — an
+"archive" org, for example — in one go. Pick them in an interactive terminal UI,
+or script it.
 
-[Releases](../../releases) から OS に合ったファイルをダウンロードして展開し、`ghbt`（Windows は `ghbt.exe`）を PATH の通った場所に置いてください。
+<p align="center">
+  <img src="docs/demo-interactive.gif" alt="ghbt interactive mode: choose source and destination, tick repositories, review the plan, transfer" width="806">
+</p>
 
-| OS | ファイル |
+- **Interactive**: run `ghbt`, choose *from* (your account or an organization) and
+  *to*, tick repositories in a filterable list sorted by last push, confirm.
+- **Safe by default**: shows a checked plan before doing anything — name already
+  taken in the destination, already moved, or no admin rights are skipped or
+  reported, and nothing happens until you confirm. `--dry-run` is available too.
+- **Scriptable**: `ghbt list` exports an editable list, `ghbt transfer` takes a
+  file, arguments or filters (`--pushed-before`, `--forks`, `--match`, ...).
+- **Optional archiving** of each repository after it has been moved.
+- Waits and retries automatically when GitHub's rate limits kick in.
+- Single binary for Windows, macOS and Linux (amd64 / arm64). Also works with
+  GitHub Enterprise Server (`--api-url`).
+
+## Install
+
+Download the archive for your platform from the
+[latest release](https://github.com/ShelterLLC/githubBulkTransfer/releases/latest),
+extract it and put `ghbt` (`ghbt.exe` on Windows) somewhere on your `PATH`.
+
+| Platform | File |
 | --- | --- |
-| Windows | `ghbt_<version>_windows_amd64.zip`（ARM 機は `arm64`） |
+| Windows | `ghbt_<version>_windows_amd64.zip` (`arm64` for ARM) |
 | macOS (Apple Silicon) | `ghbt_<version>_darwin_arm64.tar.gz` |
 | macOS (Intel) | `ghbt_<version>_darwin_amd64.tar.gz` |
-| Linux | `ghbt_<version>_linux_amd64.tar.gz`（ARM 機は `arm64`） |
+| Linux | `ghbt_<version>_linux_amd64.tar.gz` (`arm64` for ARM) |
 
-macOS で「開発元を検証できません」と出る場合は、隔離属性を外してください。
+On macOS, if the binary is blocked because it is not notarized:
 
 ```bash
 xattr -d com.apple.quarantine ./ghbt
 ```
 
-Go がある環境なら、ソースからビルドもできます。
+With Go 1.25 or newer you can also install from source:
 
 ```bash
-go build -o ghbt .
+go install github.com/ShelterLLC/githubBulkTransfer/cmd/ghbt@latest
 ```
 
-## 認証（トークン）
-
-次の順で最初に見つかったものを使います。
-
-1. `--token` オプション
-2. 環境変数 `GH_TOKEN`
-3. 環境変数 `GITHUB_TOKEN`
-4. [GitHub CLI](https://cli.github.com/) のログイン情報（`gh auth token`）
-5. （対話モードのみ）どれも無ければ、画面でトークンの入力を求めます（保存はしません）
-
-いちばん簡単なのは GitHub CLI でログインしておく方法です。
+## Quick start
 
 ```bash
 gh auth login
 ```
 
-Personal Access Token を使う場合は **classic** トークンで `repo` スコープを付けてください。
-（fine-grained トークンは 1 つのオーナーにしかアクセスできないため、個人 → Org の移動には向きません。）
-移動先 Org が SAML SSO を使っている場合は、トークンの SSO 認可も必要です。
-対話モードで所属 Org を一覧から選ぶには `read:org` スコープも必要です（`gh auth login` のトークンには最初から付いています）。無い場合は「Other (type a name)...」を選んで Org 名を入力してください。
-
-必要な権限:
-
-- 移動元リポジトリの **admin** 権限
-- 移動先 Org で **リポジトリを作成できる** 権限（Org の owner、または member にリポジトリ作成が許可されていること）
-
-## 使い方
-
-### いちばん簡単: 対話モード
-
-引数なしで実行するだけです（Windows なら `ghbt.exe` をダブルクリックしても起動します）。
-
 ```bash
 ghbt
 ```
 
-画面の指示に従って進めます。
+That's it: `ghbt` picks up the [GitHub CLI](https://cli.github.com/) login
+(see [Authentication](#authentication) for other options) and walks you through:
 
-1. **Move repositories FROM**: 移動元を選ぶ（自分 / 所属 Org / 名前を入力）
-2. **Move repositories TO**: 移動先の Org を選ぶ
-3. **Select repositories**: 移動するリポジトリにチェックを付ける（最終 push が古い順に並びます）
-4. **Archive them after moving?**: 移動後にアーカイブするか
-5. 事前チェックの結果（同名あり・権限なし等はスキップ）を見て、**Transfer** で実行
+1. **Move repositories FROM** — your own account, or an organization you belong
+   to. Organizations are labelled `(owner)` / `(member)`.
+2. **Move repositories TO** — the destination organization.
+3. **Select repositories** — least recently pushed first, with visibility, fork,
+   archived and star information.
+4. **Archive them after moving?**
+5. **Review** the checked plan and choose **Transfer** or **Cancel**.
 
-```text
-┃ Select repositories to move to archive-org (4, least recently pushed first)
-┃ space/x: select   /: filter   ctrl+a: select all   enter: done
-┃ > ✓ old-fork  2019-02-03    [fork]
-┃   • bar       2024-01-01    [private]
-┃   ✓ foo       2024-01-01    old experiment
-┃   • keep-me   2024-01-01    [stars:12]  important project
-```
-
-| キー | 動作 |
+| Key | Action |
 | --- | --- |
-| `↑` `↓`（または `k` `j`） | 移動 |
-| `space` / `x` | チェックの ON/OFF |
-| `/` | 文字を入力して絞り込み（名前・日付・`fork`・`private` などで絞れます） |
-| `ctrl+a` | 全部選択 / 全部解除 |
-| `enter` | 決定 |
-| `shift+tab` | 同じ画面の前の項目に戻る |
-| `ctrl+c` | 選択中なら中止（何も移動しません）。移動の実行中に押すと、残りの移動を中断します |
+| `↑` `↓` (or `k` `j`) | Move |
+| `space` / `x` | Select / unselect |
+| `/` | Filter by typing (name, date, `fork`, `private`, ...) |
+| `ctrl+a` | Select all / none |
+| `enter` | Confirm |
+| `shift+tab` | Back to the previous question on the same screen |
+| `ctrl+c` | Quit (nothing is transferred while you are still choosing) |
 
-画面の表示が崩れる環境では、番号を入力して選ぶシンプルなモードも使えます。
+On Windows you can also just double-click `ghbt.exe`. If the full-screen UI does
+not work in your terminal, use numbered prompts instead:
 
 ```bash
 ghbt interactive --accessible
 ```
 
-### ファイルで指定する流れ（スクリプト・大量向け）
+## Command-line usage
+
+<p align="center">
+  <img src="docs/demo-cli.gif" alt="ghbt list and ghbt transfer on the command line" width="806">
+</p>
+
+### Edit a list, then transfer it
 
 ```bash
-# 1. 自分のリポジトリ一覧をファイルに書き出す（最終 push が古い順）
 ghbt list --sort pushed -o repos.txt
 ```
 
-`repos.txt` はこんな形式です。
+`repos.txt` contains one repository per line. Delete the lines (or comment them
+out with `#`) of the repositories you want to **keep**:
 
 ```text
-# 5 of 5 repositories owned by alice (ghbt list, 2026-11-23)
+# 4 of 4 repositories owned by alice (ghbt list, 2026-11-23)
 # Keep only the lines of repositories you want to TRANSFER.
 # Delete a line (or put '#' in front of it) to leave that repository where it is.
 # Then run: ghbt transfer --to <ORG> --file <this file> --dry-run
-alice/empty      # public  pushed:never  stars:0
-alice/old-fork   # public  fork  pushed:2020-05-01  stars:0
-alice/old-thing  # public  pushed:2020-05-01  stars:0
-alice/bar        # private  pushed:2024-01-01  stars:0
-alice/keep-me    # public  pushed:2024-01-01  stars:0
+alice/jquery-playground  # public  fork  pushed:2015-06-12  stars:0
+alice/old-blog           # public  pushed:2017-03-21  stars:0  Jekyll blog
+alice/ml-experiments     # private  pushed:2019-11-30  stars:0
+alice/dotfiles           # public  pushed:2026-10-28  stars:8  My dotfiles
 ```
 
-2. エディタで開き、**移動したいリポジトリの行だけ残します**。残したい（移動しない）ものは行を消すか、先頭に `#` を付けてください。
+```bash
+ghbt transfer --to my-archive-org --file repos.txt --dry-run
+```
 
 ```bash
-# 3. 何が起きるかだけ確認（実際には移動しない）
-ghbt transfer --to my-archive-org --file repos.txt --dry-run
-
-# 4. 実行（確認プロンプトで y を入力）
 ghbt transfer --to my-archive-org --file repos.txt
 ```
 
-実行例:
-
-```text
-Destination: my-archive-org (organization)
-
-  transfer  alice/foo
-  transfer  alice/bar
-  skip      alice/baz      my-archive-org/baz already exists
-  error     alice/missing  not found (or the token cannot access it)
-
-2 to transfer, 1 skipped, 1 error(s)
-Transfer 2 repositories to my-archive-org? [y/N]: y
-[1/2] alice/foo -> my-archive-org/foo ... ok
-[2/2] alice/bar -> my-archive-org/bar ... ok
-
-Done: 2 transferred, 0 failed, 1 skipped, 1 error(s) before transfer
-```
-
-### 引数で直接指定
+### Name repositories directly
 
 ```bash
 ghbt transfer --to my-archive-org old-project another-repo alice/third-repo
 ```
 
-リポジトリは `NAME`、`OWNER/NAME`、`https://github.com/OWNER/NAME`、`git@github.com:OWNER/NAME.git` のどれでも指定できます。
-`NAME` だけの場合は `--from`（省略時は自分）のリポジトリとして扱います。
+`NAME`, `OWNER/NAME`, `https://github.com/OWNER/NAME` and
+`git@github.com:OWNER/NAME.git` are all accepted. A bare `NAME` belongs to
+`--from` (default: you).
 
-### 条件で一括指定
+### Select with filters
 
-ファイルや引数を指定しない場合は、フィルタ条件（または `--all`）で `--from` の全リポジトリから選びます。
+Without a file or arguments, filters (or `--all`) select from all repositories
+of `--from`:
 
 ```bash
-# 2023年以降 push していない、fork 以外のリポジトリを移動して、移動後にアーカイブ
 ghbt transfer --to my-archive-org --pushed-before 2023-01-01 --forks exclude --archive
+```
 
-# 名前が "test-" で始まるものを移動
+```bash
 ghbt transfer --to my-archive-org --match '^test-'
+```
 
-# 全部移動（"keep" を含む名前は除外）
+```bash
 ghbt transfer --to my-archive-org --all --exclude keep
 ```
 
-同じフィルタは `ghbt list` でも使えるので、先に `list` で対象を確認するのがおすすめです。
+The same filters work with `ghbt list`, so you can preview the selection first.
 
-### コマンドとオプション
+### Commands and flags
 
 ```text
-ghbt                                       対話モード
-ghbt interactive [flags]                   対話モード（--accessible, --interval などを指定する場合）
-ghbt list     [flags]                      リポジトリ一覧を表示 / ファイル出力
-ghbt transfer --to OWNER [flags] [REPO...]  リポジトリを OWNER へ移動
-ghbt version                               バージョン表示
+ghbt                                       interactive mode
+ghbt interactive [flags]                   interactive mode with flags
+ghbt list     [flags]                      list repositories (editable text or JSON)
+ghbt transfer --to OWNER [flags] [REPO...]  transfer repositories to OWNER
+ghbt version                               print the version
 ```
 
-共通オプション:
+Common flags:
 
-| オプション | 説明 |
+| Flag | Description |
 | --- | --- |
-| `--from OWNER` | 一覧の取得元（ユーザーまたは Org）。省略時は自分 |
-| `--token TOKEN` | GitHub トークン（環境変数や `gh` の方が安全です） |
-| `--api-url URL` | API の URL。GitHub Enterprise Server なら `https://HOST/api/v3` |
+| `--from OWNER` | Source user or organization (default: you) |
+| `--token TOKEN` | GitHub token (prefer `GH_TOKEN` or `gh auth login`) |
+| `--api-url URL` | API base URL; GitHub Enterprise Server: `https://HOST/api/v3` |
 
-フィルタ（`list` / `transfer` 共通）:
+Filters (`list` and `transfer`):
 
-| オプション | 説明 |
+| Flag | Description |
 | --- | --- |
-| `--match REGEXP` | 名前が正規表現に一致するものだけ（大文字小文字無視） |
-| `--exclude REGEXP` | 名前が正規表現に一致するものを除外 |
-| `--visibility all\|public\|private\|internal` | 公開範囲で絞り込み |
-| `--archived any\|only\|exclude` | アーカイブ済みを含める / だけ / 除外 |
-| `--forks any\|only\|exclude` | fork を含める / だけ / 除外 |
-| `--pushed-before YYYY-MM-DD` | 指定日より前が最終 push のもの（一度も push されていないものも含む） |
+| `--match REGEXP` | Only names matching the regular expression (case-insensitive) |
+| `--exclude REGEXP` | Skip names matching the regular expression |
+| `--visibility all\|public\|private\|internal` | Filter by visibility |
+| `--archived any\|only\|exclude` | Include, only, or exclude archived repositories |
+| `--forks any\|only\|exclude` | Include, only, or exclude forks |
+| `--pushed-before YYYY-MM-DD` | Last pushed before the date (never-pushed ones match too) |
 
-`list` のオプション:
+`list`: `-o FILE`, `--sort name|pushed`, `--format text|json`.
 
-| オプション | 説明 |
-| --- | --- |
-| `-o FILE` | ファイルに出力 |
-| `--sort name\|pushed` | 並び順（`pushed` は最終 push が古い順） |
-| `--format text\|json` | 出力形式 |
+`transfer`: `--to OWNER` (required), `--file FILE` / `-f` (`-` = stdin, needs
+`--yes`), `--all`, `--dry-run`, `--yes` / `-y`, `--archive`, `--interval 2s`.
 
-`transfer` のオプション:
+`interactive`: `--from OWNER`, `--accessible`, `--interval 2s`.
 
-| オプション | 説明 |
-| --- | --- |
-| `--to OWNER` | 移動先（必須）。通常は Org 名 |
-| `--file FILE`, `-f` | 一覧ファイル（`-` で標準入力。その場合は `--yes` 必須） |
-| `--all` | `--from` の全リポジトリを対象にする |
-| `--dry-run` | 計画を表示するだけで移動しない |
-| `--yes`, `-y` | 確認プロンプトを出さない |
-| `--archive` | 移動後にアーカイブする |
-| `--interval 2s` | 移動ごとの待ち時間（レートリミット対策） |
+Exit codes: `0` success, `1` failures or errors, `2` usage error, `130` interrupted.
 
-終了コード: `0` 成功 / `1` 失敗やエラーあり / `2` 引数の誤り / `130` Ctrl+C で中断
+## Authentication
 
-## 注意事項
+The first token found is used:
 
-- Issue・PR・Wiki・Star・Watcher などはリポジトリと一緒に移動します。
-- 旧 URL（Web と git の clone/push URL）は新しい場所へリダイレクトされます。ただし旧オーナー側に同名リポジトリを新しく作るとリダイレクトは切れます。GitHub Pages の URL はリダイレクトされません。
-- 移動先に同名リポジトリがあるものはスキップします（名前を変えてから再実行してください）。
-- 移動先がユーザー（自分以外）の場合は、相手がメールで承認するまで移動は完了しません。
-- 元に戻したいときは `ghbt transfer --from my-archive-org --to <自分のユーザー名> REPO...` で戻せます。
-- 詳細は GitHub のドキュメント [Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository) を参照してください。
+1. `--token`
+2. `GH_TOKEN`
+3. `GITHUB_TOKEN`
+4. the GitHub CLI login (`gh auth token`)
+5. interactive mode only: you are asked to paste one (it is not stored)
 
-## リリース方法（GitHub Actions）
+If you use a personal access token, create a **classic** token with the `repo`
+scope (add `read:org` to see your organizations and roles in interactive mode;
+`gh auth login` includes both). Fine-grained tokens are limited to a single
+owner, so they usually cannot move repositories from your account to an
+organization. If the organization uses SAML SSO, authorize the token for it.
 
-`.github/workflows/release.yml` が [GoReleaser](https://goreleaser.com/) で 6 種類（Windows / macOS / Linux × amd64 / arm64）のバイナリをビルドし、GitHub Release を作成します。チェックサム（`checksums.txt`）と変更履歴も自動で付きます。
+Required permissions:
 
-方法 1: タグを push する
+- **admin** on each repository you move
+- permission to **create repositories** in the destination organization
+
+## What happens when a repository is transferred
+
+- Issues, pull requests, wiki, stars and watchers move with the repository.
+- Web and git URLs of the old location redirect to the new one — until a new
+  repository with the same name is created at the old location. GitHub Pages
+  URLs are not redirected.
+- Repositories whose name already exists in the destination are skipped.
+- Transfers to another **user** must be accepted by that user by email.
+- To undo, transfer back:
+  `ghbt transfer --from my-archive-org --to <your-user> REPO...`
+
+See GitHub's documentation:
+[Transferring a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/transferring-a-repository).
+
+## Development
+
+```bash
+go test ./...
+```
+
+The tests use a fake GitHub API server, so no token or network is needed. The
+demo GIFs are recorded against a fake API as well; see [docs/demo](docs/demo).
+
+### Releasing
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds all
+platforms with [GoReleaser](https://goreleaser.com/) and publishes a GitHub
+release with checksums. Either push a tag:
 
 ```bash
 git tag v1.0.0
@@ -252,14 +248,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-方法 2: GitHub の **Actions → Release → Run workflow** からバージョン（例: `v1.0.0`）を入力して実行する（タグは自動で作られます）
+or run **Actions → Release → Run workflow** and enter the version.
+[`ci.yml`](.github/workflows/ci.yml) tests every push on Linux, macOS and
+Windows and uploads snapshot binaries as workflow artifacts.
 
-`.github/workflows/ci.yml` は push / PR ごとに Windows・macOS・Linux でテストし、スナップショットのバイナリを Actions の Artifacts（`ghbt-snapshot`、14 日保存）としてアップロードします。
+## License
 
-## 開発
-
-```bash
-go test ./...
-```
-
-テストはモックの GitHub API サーバーを使うので、トークンやネットワークは不要です。
+[MIT](LICENSE). This project is not affiliated with or endorsed by GitHub.

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -84,9 +85,10 @@ func newAPIError(method, path string, status int, body []byte) *APIError {
 		Errors  []json.RawMessage `json:"errors"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200] + "..."
+		// Not JSON (e.g. an HTML page from a proxy): show a short single line.
+		msg := strings.Join(strings.Fields(string(body)), " ")
+		if r := []rune(msg); len(r) > 120 {
+			msg = string(r[:120]) + "..."
 		}
 		e.Message = msg
 		return e
@@ -345,10 +347,42 @@ func (c *Client) ListRepos(ctx context.Context, owner string, me *Account) ([]Re
 	return getAll[Repo](ctx, c, "/users/"+url.PathEscape(acct.Login)+"/repos?type=owner&per_page=100")
 }
 
-// MyOrgs lists the organizations the authenticated user belongs to.
-// Classic tokens need the read:org (or user) scope to see all of them.
-func (c *Client) MyOrgs(ctx context.Context) ([]Account, error) {
-	return getAll[Account](ctx, c, "/user/orgs?per_page=100")
+// OrgMembership is an organization the authenticated user belongs to.
+type OrgMembership struct {
+	Login string
+	Role  string // "admin" (= owner), "member", or "" if unknown
+}
+
+// MyOrgs lists the organizations the authenticated user belongs to, owners
+// first. Classic tokens need the read:org scope to see the role and all orgs.
+func (c *Client) MyOrgs(ctx context.Context) ([]OrgMembership, error) {
+	var out []OrgMembership
+	type membership struct {
+		Role         string  `json:"role"`
+		Organization Account `json:"organization"`
+	}
+	ms, err := getAll[membership](ctx, c, "/user/memberships/orgs?state=active&per_page=100")
+	if err == nil {
+		for _, m := range ms {
+			out = append(out, OrgMembership{Login: m.Organization.Login, Role: m.Role})
+		}
+	} else {
+		// Fallback without roles (e.g. tokens without read:org).
+		orgs, err2 := getAll[Account](ctx, c, "/user/orgs?per_page=100")
+		if err2 != nil {
+			return nil, err
+		}
+		for _, o := range orgs {
+			out = append(out, OrgMembership{Login: o.Login})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if (out[i].Role == "admin") != (out[j].Role == "admin") {
+			return out[i].Role == "admin"
+		}
+		return strings.ToLower(out[i].Login) < strings.ToLower(out[j].Login)
+	})
+	return out, nil
 }
 
 // TransferRepo starts the transfer of owner/name to newOwner.
