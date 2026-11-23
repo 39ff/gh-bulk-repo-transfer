@@ -219,10 +219,10 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 func writeRepoText(w io.Writer, repos []*Repo, owner string, total int) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %d of %d repositories owned by %s (ghbt list, %s)\n", len(repos), total, owner, nowFn().Format("2006-01-02"))
+	fmt.Fprintf(&b, "# %d of %d repositories owned by %s (%s list, %s)\n", len(repos), total, owner, progName, nowFn().Format("2006-01-02"))
 	b.WriteString("# Keep only the lines of repositories you want to TRANSFER.\n")
 	b.WriteString("# Delete a line (or put '#' in front of it) to leave that repository where it is.\n")
-	b.WriteString("# Then run: ghbt transfer --to <ORG> --file <this file> --dry-run\n")
+	b.WriteString(named("# Then run: ghbt transfer --to <ORG> --file <this file> --dry-run\n"))
 	width := 0
 	for _, r := range repos {
 		width = max(width, len(r.FullName))

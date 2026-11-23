@@ -168,7 +168,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) (*h
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-		req.Header.Set("User-Agent", "ghbt/"+version)
+		req.Header.Set("User-Agent", "gh-bulk-repo-transfer/"+version)
 		if c.token != "" {
 			req.Header.Set("Authorization", "Bearer "+c.token)
 		}

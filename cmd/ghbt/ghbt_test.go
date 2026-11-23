@@ -770,3 +770,25 @@ func TestMyOrgs(t *testing.T) {
 		t.Errorf("label = %q", l)
 	}
 }
+
+func TestDetectProgName(t *testing.T) {
+	cases := map[string]string{
+		"/usr/local/bin/ghbt": "ghbt",
+		"ghbt.exe":            "ghbt",
+		"/home/u/.local/share/gh/extensions/gh-bulk-repo-transfer/gh-bulk-repo-transfer": "gh bulk-repo-transfer",
+		"gh-bulk-repo-transfer.exe":  "gh bulk-repo-transfer",
+		"/tmp/go-build/ghbt.test":    "ghbt",
+		"/opt/something/else-binary": "ghbt",
+	}
+	for in, want := range cases {
+		if got := detectProgName(in); got != want {
+			t.Errorf("detectProgName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	orig := progName
+	defer func() { progName = orig }()
+	progName = "gh bulk-repo-transfer"
+	if got := named(`Run "ghbt transfer -h"`); got != `Run "gh bulk-repo-transfer transfer -h"` {
+		t.Errorf("named = %q", got)
+	}
+}

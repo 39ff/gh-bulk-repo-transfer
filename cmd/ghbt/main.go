@@ -10,7 +10,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,21 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
+
+// progName is how the user runs this program: "gh bulk-repo-transfer" when it
+// is installed as a GitHub CLI extension, otherwise "ghbt".
+var progName = detectProgName(os.Args[0])
+
+func detectProgName(arg0 string) string {
+	base := strings.TrimSuffix(filepath.Base(arg0), ".exe")
+	if strings.HasPrefix(base, "gh-") {
+		return "gh " + strings.TrimPrefix(base, "gh-")
+	}
+	return "ghbt"
+}
+
+// named puts the actual program name into help texts and messages.
+func named(s string) string { return strings.ReplaceAll(s, "ghbt", progName) }
 
 // Package-level hooks so tests can run without real waits or environment.
 var (
@@ -74,12 +90,12 @@ func main() {
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		if !isTerminal(stdin) {
-			fmt.Fprint(stderr, usageText)
+			fmt.Fprint(stderr, named(usageText))
 			return 2
 		}
 		code := cmdInteractive(ctx, nil, stdin, stdout, stderr)
-		if runtime.GOOS == "windows" {
-			pauseBeforeExit(stdin, stdout) // keep a double-clicked console window open
+		if startedByDoubleClick() {
+			pauseBeforeExit(stdin, stdout) // keep the console window open to show the result
 		}
 		return code
 	}
@@ -91,13 +107,13 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "transfer", "mv":
 		return cmdTransfer(ctx, args[1:], stdin, stdout, stderr)
 	case "version", "--version", "-version", "-v":
-		fmt.Fprintf(stdout, "ghbt %s (commit %s, built %s)\n", version, commit, date)
+		fmt.Fprintf(stdout, "%s %s (commit %s, built %s)\n", progName, version, commit, date)
 		return 0
 	case "help", "--help", "-help", "-h":
-		fmt.Fprint(stdout, usageText)
+		fmt.Fprint(stdout, named(usageText))
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usageText)
+		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], named(usageText))
 		return 2
 	}
 }
@@ -150,7 +166,7 @@ func newFlagSet(name, synopsis string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "%s\nFlags:\n", synopsis)
+		fmt.Fprintf(stderr, "%s\nFlags:\n", named(synopsis))
 		fs.PrintDefaults()
 	}
 	return fs

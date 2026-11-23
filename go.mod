@@ -1,4 +1,4 @@
-module github.com/ShelterLLC/githubBulkTransfer
+module github.com/39ff/gh-bulk-repo-transfer
 
 go 1.25.8
 

@@ -69,7 +69,7 @@ func cmdTransfer(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	usageErr := func(format string, a ...any) int {
 		fmt.Fprintf(stderr, "error: "+format+"\n", a...)
-		fmt.Fprintln(stderr, `Run "ghbt transfer -h" for help.`)
+		fmt.Fprintln(stderr, named(`Run "ghbt transfer -h" for help.`))
 		return 2
 	}
 	if to == "" {

@@ -1,7 +1,7 @@
 # GoReleaser config: https://goreleaser.com/customization/
 version: 2
 
-project_name: ghbt
+project_name: gh-bulk-repo-transfer
 
 builds:
   - id: ghbt
@@ -17,16 +17,22 @@ builds:
       - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }}
 
 archives:
-  - id: ghbt
+  # Standalone downloads: ghbt binary + docs.
+  - id: standalone
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "ghbt_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - README.ja.md
       - LICENSE
+  # Raw binaries for "gh extension install": gh picks the asset whose name
+  # ends with <os>-<arch> (".exe" on Windows) from the latest release.
+  - id: gh-extension
+    formats: [binary]
+    name_template: "gh-bulk-repo-transfer_{{ .Tag }}_{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt

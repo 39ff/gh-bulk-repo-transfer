@@ -50,7 +50,7 @@ func cmdInteractive(ctx context.Context, args []string, stdin io.Reader, stdout,
 		return 2
 	}
 	if !accessible && !isTerminal(stdin) {
-		fmt.Fprintln(stderr, `error: interactive mode needs a terminal; use "ghbt list" and "ghbt transfer" in scripts`)
+		fmt.Fprintln(stderr, named(`error: interactive mode needs a terminal; use "ghbt list" and "ghbt transfer" in scripts`))
 		return 2
 	}
 
